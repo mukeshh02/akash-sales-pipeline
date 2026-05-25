@@ -1,0 +1,13 @@
+{
+    "name": "AkashSalesPipeline",
+    "alias": "akashsalespipeline",
+    "description": "Custom sales pipeline module for Akash Camera Production",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\AkashSalesPipeline\\Providers\\AkashSalesPipelineServiceProvider"
+    ],
+    "files": [],
+    "version": "1.0.0",
+    "update_channel": "https://api.github.com/repos/mukeshh02/akash-sales-pipeline/releases/latest"
+}

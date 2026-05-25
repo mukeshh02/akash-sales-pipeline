@@ -1,0 +1,22 @@
+{
+    "name": "akashcameraproduction/akashsalespipeline",
+    "description": "Custom sales pipeline module for Akash Camera Production",
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {}
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\AkashSalesPipeline\\": "app/",
+            "Modules\\AkashSalesPipeline\\Database\\Factories\\": "database/factories/",
+            "Modules\\AkashSalesPipeline\\Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\AkashSalesPipeline\\Tests\\": "tests/"
+        }
+    }
+}
