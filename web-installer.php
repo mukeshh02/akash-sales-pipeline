@@ -1,365 +1,315 @@
-﻿<?php
+<?php
 /**
- * AkashSalesPipeline â€” Web Installer
+ * ACP Sales Guide — Web Installer (Shared Hosting / cPanel Edition)
+ * Works WITHOUT shell_exec / exec — uses Laravel bootstrap directly.
  *
- * FOR cPanel / Shared Hosting users (no SSH needed)
- *
- * INSTALL STEPS:
- *   1. Download this file
- *   2. Upload to your website's PUBLIC folder (public_html/public/ OR public_html/)
- *   3. Visit: https://yourdomain.com/web-installer.php
- *   4. Click Install
- *   5. DELETE this file after install (security!)
+ * 1. Upload this file to: public_html/sales/public/web-installer.php
+ * 2. Visit: https://yourdomain.com/web-installer.php
+ * 3. DELETE this file after install!
  */
 
 define('GITHUB_REPO',   'mukeshh02/akash-sales-pipeline');
 define('MODULE_NAME',   'ACP_Sales_Guide');
-define('SECRET_KEY',    'akash2024install');  // Simple protection â€” change this!
+define('SECRET_KEY',    'akash2024install');
 define('MIN_PHP',       '8.1.0');
 
-// â”€â”€â”€ Find Laravel root â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Works whether this file is in public/ OR public_html/ (cPanel root)
 function findLaravelRoot(): ?string {
-    $checks = [
-        dirname(__FILE__),           // same folder
-        dirname(__FILE__) . '/..',   // one level up (public/ â†’ root)
-        dirname(__FILE__) . '/../..', // two levels up
-    ];
-    foreach ($checks as $path) {
-        $real = realpath($path);
-        if ($real && file_exists("$real/artisan") && file_exists("$real/composer.json")) {
-            return $real;
-        }
+    foreach ([__DIR__, dirname(__DIR__), dirname(__DIR__, 2)] as $path) {
+        $r = realpath($path);
+        if ($r && file_exists("$r/artisan") && file_exists("$r/vendor/autoload.php")) return $r;
     }
     return null;
 }
 
+function copyDirR(string $src, string $dst): void {
+    @mkdir($dst, 0755, true);
+    foreach (scandir($src) as $f) {
+        if ($f === '.' || $f === '..') continue;
+        is_dir("$src/$f") ? copyDirR("$src/$f", "$dst/$f") : copy("$src/$f", "$dst/$f");
+    }
+}
+
+function deleteDirR(string $dir): void {
+    if (!is_dir($dir)) return;
+    foreach (scandir($dir) as $f) {
+        if ($f === '.' || $f === '..') continue;
+        $p = "$dir/$f";
+        is_dir($p) ? deleteDirR($p) : unlink($p);
+    }
+    rmdir($dir);
+}
+
 $laravelRoot = findLaravelRoot();
 
-// â”€â”€â”€ Handle AJAX actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
 
-    // Security check
     if (($_POST['key'] ?? '') !== SECRET_KEY) {
         echo json_encode(['ok' => false, 'msg' => 'Invalid security key']);
         exit;
     }
 
-    $action = $_POST['action'];
+    $action = $_POST['action'] ?? '';
 
+    // ── CHECK ──────────────────────────────────────────────────────────────
     if ($action === 'check') {
-        // Check requirements
         $issues = [];
         if (version_compare(PHP_VERSION, MIN_PHP, '<'))
-            $issues[] = "PHP " . MIN_PHP . "+ required (you have " . PHP_VERSION . ")";
+            $issues[] = 'PHP ' . MIN_PHP . '+ required (you have ' . PHP_VERSION . ')';
         if (!extension_loaded('zip'))   $issues[] = "PHP extension 'zip' missing";
         if (!extension_loaded('curl'))  $issues[] = "PHP extension 'curl' missing";
-        if (!$laravelRoot)              $issues[] = "Laravel root not found. Is this file in public/ folder?";
+        if (!$laravelRoot)              $issues[] = 'Laravel root not found — put this file in public/ folder';
 
-        // Fetch latest version from GitHub
-        $release = @json_decode(file_get_contents(
-            "https://api.github.com/repos/" . GITHUB_REPO . "/releases/latest",
-            false,
-            stream_context_create(['http' => [
-                'method'  => 'GET',
-                'header'  => "User-Agent: AkashWebInstaller/1.0\r\n",
-                'timeout' => 10,
-            ]])
-        ), true);
+        $release  = null;
+        $ch = curl_init("https://api.github.com/repos/" . GITHUB_REPO . "/releases/latest");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_USERAGENT      => 'ACPInstaller/2.0',
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTPHEADER     => ['Accept: application/vnd.github+json'],
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code === 200 && $resp) {
+            $release = json_decode($resp, true);
+        } else {
+            $issues[] = "Cannot reach GitHub (HTTP $code)";
+        }
 
         echo json_encode([
-            'ok'          => empty($issues),
-            'issues'      => $issues,
-            'php'         => PHP_VERSION,
-            'laravel_root'=> $laravelRoot,
-            'version'     => $release['tag_name'] ?? 'Unknown',
-            'changelog'   => $release['body'] ?? '',
-            'zip_url'     => $release['assets'][0]['browser_download_url'] ?? $release['zipball_url'] ?? '',
+            'ok'           => empty($issues),
+            'issues'       => $issues,
+            'php'          => PHP_VERSION,
+            'laravel_root' => $laravelRoot,
+            'version'      => $release['tag_name']    ?? 'Unknown',
+            'changelog'    => $release['body']         ?? '',
+            'zip_url'      => $release['zipball_url']  ?? '',
         ]);
         exit;
     }
 
+    // ── INSTALL ────────────────────────────────────────────────────────────
     if ($action === 'install') {
-        $zipUrl = $_POST['zip_url'] ?? '';
         $steps  = [];
+        $zipUrl = $_POST['zip_url'] ?? '';
 
         try {
-            // Step 1: Download ZIP
-            $steps[] = "â¬‡ï¸ Downloading...";
-            $tmpZip = sys_get_temp_dir() . '/akash_install.zip';
+            // 1. Download
+            $steps[] = '⬇️ Downloading from GitHub...';
+            $tmpZip  = sys_get_temp_dir() . '/acp_' . time() . '.zip';
             $ch = curl_init($zipUrl);
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_USERAGENT      => 'AkashWebInstaller/1.0',
+                CURLOPT_USERAGENT      => 'ACPInstaller/2.0',
                 CURLOPT_TIMEOUT        => 120,
             ]);
             $data = curl_exec($ch);
-            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
-
-            if ($code !== 200 || !$data) throw new Exception("Download failed (HTTP $code)");
+            if (!$data || $http !== 200) throw new Exception("Download failed HTTP $http");
             file_put_contents($tmpZip, $data);
-            $steps[] = "âœ… Downloaded (" . round(strlen($data)/1024) . " KB)";
+            $steps[] = '✅ Downloaded (' . round(strlen($data)/1024) . ' KB)';
 
-            // Step 2: Extract ZIP
-            $steps[] = "ðŸ“¦ Extracting...";
-            $tmpDir  = sys_get_temp_dir() . '/akash_extract';
-            if (is_dir($tmpDir)) array_map('unlink', glob("$tmpDir/*.*"));
+            // 2. Extract
+            $steps[] = '📦 Extracting...';
+            $tmpDir  = sys_get_temp_dir() . '/acp_ext_' . time();
             @mkdir($tmpDir, 0755, true);
-
             $zip = new ZipArchive();
-            if ($zip->open($tmpZip) !== true) throw new Exception("Cannot open ZIP");
+            if ($zip->open($tmpZip) !== true) throw new Exception('Cannot open ZIP');
             $zip->extractTo($tmpDir);
             $zip->close();
             unlink($tmpZip);
 
-            // Find module folder in ZIP
-            $moduleSrc = $tmpDir . '/AkashSalesPipeline';
-            if (!is_dir($moduleSrc)) {
-                // GitHub zipball has a subfolder
-                foreach (scandir($tmpDir) as $e) {
-                    $sub = "$tmpDir/$e";
-                    if ($e[0] !== '.' && is_dir($sub) && is_dir("$sub/AkashSalesPipeline")) {
-                        $moduleSrc = "$sub/AkashSalesPipeline";
-                        break;
-                    }
-                    // Direct subfolder that IS the module
-                    if ($e[0] !== '.' && is_dir($sub) && file_exists("$sub/module.json")) {
-                        $moduleSrc = $sub;
-                        break;
-                    }
+            // Find module root inside ZIP
+            $moduleSrc = null;
+            foreach (scandir($tmpDir) as $e) {
+                if ($e[0] === '.') continue;
+                $sub = "$tmpDir/$e";
+                if (is_dir($sub) && file_exists("$sub/module.json")) {
+                    $moduleSrc = $sub; break;
                 }
             }
-            if (!is_dir($moduleSrc)) throw new Exception("Module folder not found in ZIP");
-            $steps[] = "âœ… Extracted";
+            if (!$moduleSrc) throw new Exception('module.json not found inside ZIP');
+            $steps[] = '✅ Extracted';
 
-            // Step 3: Copy module to modules/
-            $steps[] = "ðŸ“‚ Copying module files...";
+            // 3. Copy module files
+            $steps[]    = '📂 Installing module files...';
             $moduleDest = $laravelRoot . '/modules/' . MODULE_NAME;
-
-            function copyDirWeb($src, $dst) {
-                @mkdir($dst, 0755, true);
-                foreach (scandir($src) as $f) {
-                    if ($f === '.' || $f === '..') continue;
-                    is_dir("$src/$f") ? copyDirWeb("$src/$f", "$dst/$f") : copy("$src/$f", "$dst/$f");
-                }
-            }
-
-            // Backup old version if exists
             if (is_dir($moduleDest)) {
-                rename($moduleDest, $moduleDest . '_backup_' . date('YmdHis'));
+                rename($moduleDest, $moduleDest . '_bak_' . date('YmdHis'));
             }
-            copyDirWeb($moduleSrc, $moduleDest);
-            $steps[] = "âœ… Module files copied to modules/" . MODULE_NAME;
+            copyDirR($moduleSrc, $moduleDest);
+            deleteDirR($tmpDir);
+            $steps[] = '✅ Files copied to modules/' . MODULE_NAME;
 
-            // Step 4: Copy pre-built assets (if packaged in ZIP)
-            $assetSrc = $tmpDir . '/public/build';
-            // Try in subfolder too
-            if (!is_dir($assetSrc)) {
-                foreach (scandir($tmpDir) as $e) {
-                    $sub = "$tmpDir/$e/public/build";
-                    if ($e[0] !== '.' && is_dir($sub)) { $assetSrc = $sub; break; }
-                }
-            }
-            if (is_dir($assetSrc)) {
-                $steps[] = "ðŸŽ¨ Copying pre-built assets...";
-                copyDirWeb($assetSrc, $laravelRoot . '/public/build');
-                $steps[] = "âœ… Assets copied (npm run build NOT needed!)";
-            } else {
-                $steps[] = "âš ï¸ Pre-built assets not in ZIP. You may need to run: npm run build";
-            }
+            // 4. Enable in modules_statuses.json
+            $steps[]    = '⚙️ Enabling module...';
+            $statusFile = $laravelRoot . '/modules_statuses.json';
+            $statuses   = file_exists($statusFile)
+                ? (json_decode(file_get_contents($statusFile), true) ?? [])
+                : [];
+            $statuses[MODULE_NAME] = true;
+            file_put_contents($statusFile, json_encode($statuses, JSON_PRETTY_PRINT));
+            $steps[] = '✅ Module enabled';
 
-            // Step 5: Run artisan commands via PHP CLI
-            $steps[] = "ðŸ—„ï¸ Running migrations...";
-            $phpBin  = PHP_BINARY;
-            $artisan = $laravelRoot . '/artisan';
-            $cmds    = [
-                "migrate --force"            => "Migrations",
-                "module:enable AkashSalesPipeline" => "Module enabled",
-                "core:clear-cache"           => "Cache cleared",
-                "optimize:clear"             => "Optimized",
-            ];
-            foreach ($cmds as $cmd => $label) {
-                $out = shell_exec("\"$phpBin\" \"$artisan\" $cmd 2>&1");
-                $steps[] = "âœ… $label";
+            // 5. Clear bootstrap/cache files
+            $steps[]  = '🧹 Clearing cache files...';
+            $cacheDir = $laravelRoot . '/bootstrap/cache';
+            foreach (['config.php','packages.php','services.php','routes-v7.php','events.php','module_autoload.php','modules.php'] as $cf) {
+                $fp = "$cacheDir/$cf";
+                if (file_exists($fp)) unlink($fp);
             }
+            $steps[] = '✅ Bootstrap cache cleared';
 
-            // Cleanup
-            array_map('unlink', glob("$tmpDir/*.*"));
+            // 6. Run migrations via Laravel bootstrap (NO shell_exec needed!)
+            $steps[] = '🗄️ Running migrations...';
+            try {
+                require_once $laravelRoot . '/vendor/autoload.php';
+                $app    = require_once $laravelRoot . '/bootstrap/app.php';
+                $kernel = $app->make(\Illuminate\Contracts\Console\Kernel::class);
+                $kernel->bootstrap();
+
+                $exit = \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
+                $steps[] = $exit === 0 ? '✅ Migrations complete' : '⚠️ Migrations finished (code ' . $exit . ')';
+
+                \Illuminate\Support\Facades\Artisan::call('core:clear-cache');
+                \Illuminate\Support\Facades\Artisan::call('optimize:clear');
+                $steps[] = '✅ CRM cache cleared';
+
+            } catch (\Throwable $me) {
+                $steps[] = '⚠️ Auto-migration failed: ' . $me->getMessage();
+                $steps[] = '👉 Run manually via SSH: php artisan migrate --force';
+            }
 
             echo json_encode(['ok' => true, 'steps' => $steps]);
 
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             echo json_encode(['ok' => false, 'msg' => $e->getMessage(), 'steps' => $steps]);
         }
         exit;
     }
+
+    echo json_encode(['ok' => false, 'msg' => 'Unknown action']);
+    exit;
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AkashSalesPipeline Installer</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ACP Sales Guide — Installer</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #0f172a; color: #e2e8f0; min-height: 100vh;
-         display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px;
-          width: 100%; max-width: 560px; padding: 32px; }
-  .logo { text-align: center; margin-bottom: 24px; }
-  .logo h1 { font-size: 22px; color: #38bdf8; }
-  .logo p  { color: #64748b; font-size: 13px; margin-top: 6px; }
-  .badge { display: inline-block; background: #0ea5e9; color: white;
-           font-size: 11px; padding: 2px 8px; border-radius: 20px; }
-  label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
-  input[type=password] { width: 100%; background: #0f172a; border: 1px solid #334155;
-      color: #e2e8f0; border-radius: 8px; padding: 10px 14px; font-size: 14px; }
-  .btn { width: 100%; padding: 12px; border: none; border-radius: 8px;
-         font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 16px;
-         background: #0ea5e9; color: white; transition: background .2s; }
-  .btn:hover:not(:disabled) { background: #0284c7; }
-  .btn:disabled { opacity: .5; cursor: not-allowed; }
-  .checks { margin: 20px 0; }
-  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 0;
-                border-bottom: 1px solid #1e293b; font-size: 14px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .dot.ok  { background: #22c55e; }
-  .dot.err { background: #ef4444; }
-  .dot.warn { background: #f59e0b; }
-  .log { background: #0f172a; border-radius: 8px; padding: 16px; margin-top: 16px;
-         font-family: monospace; font-size: 13px; line-height: 1.8; max-height: 280px;
-         overflow-y: auto; }
-  .success-box { background: #052e16; border: 1px solid #16a34a; border-radius: 8px;
-                 padding: 16px; text-align: center; color: #4ade80; margin-top: 20px; }
-  .error-box   { background: #450a0a; border: 1px solid #dc2626; border-radius: 8px;
-                 padding: 16px; color: #fca5a5; margin-top: 20px; }
-  .version-box { background: #0c1a2e; border: 1px solid #1d4ed8; border-radius: 8px;
-                 padding: 12px 16px; margin: 16px 0; font-size: 14px; }
-  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #334155;
-             border-top-color: #38bdf8; border-radius: 50%; animation: spin .8s linear infinite;
-             vertical-align: middle; margin-right: 8px; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .warning-box { background: #431407; border: 1px solid #ea580c; border-radius: 8px;
-                 padding: 12px 16px; font-size: 13px; color: #fdba74; margin-top: 12px; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;width:100%;max-width:560px;padding:32px}
+h1{font-size:20px;color:#38bdf8;text-align:center;margin-bottom:4px}
+.sub{text-align:center;color:#64748b;font-size:13px;margin-bottom:24px}
+label{display:block;font-size:13px;color:#94a3b8;margin-bottom:6px}
+input[type=password]{width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:10px 14px;font-size:14px}
+.btn{width:100%;padding:12px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:14px;background:#0ea5e9;color:#fff}
+.btn:hover:not(:disabled){background:#0284c7}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.ci{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #0f172a;font-size:14px}
+.dot{width:8px;height:8px;border-radius:50%}
+.ok{background:#22c55e}.err{background:#ef4444}
+.log{background:#0f172a;border-radius:8px;padding:16px;margin-top:16px;font-family:monospace;font-size:13px;line-height:1.9;max-height:320px;overflow-y:auto;white-space:pre-wrap}
+.sbox{background:#052e16;border:1px solid #16a34a;border-radius:8px;padding:16px;text-align:center;color:#4ade80;margin-top:14px}
+.ebox{background:#450a0a;border:1px solid #dc2626;border-radius:8px;padding:16px;color:#fca5a5;margin-top:14px}
+.vbox{background:#0c1a2e;border:1px solid #1d4ed8;border-radius:8px;padding:12px 16px;margin:14px 0;font-size:14px}
+.wbox{background:#431407;border:1px solid #ea580c;border-radius:8px;padding:10px 14px;font-size:13px;color:#fdba74;margin-top:12px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid #334155;border-top-color:#38bdf8;border-radius:50%;animation:s .8s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes s{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="logo">
-    <h1>ðŸ“¦ AkashSalesPipeline</h1>
-    <p>Module Installer for Concord CRM</p>
-  </div>
+  <h1>📦 ACP Sales Guide</h1>
+  <p class="sub">Module Installer · Concord CRM · v2.0</p>
 
-  <!-- Step 1: Security Key -->
-  <div id="step-key">
+  <div id="s1">
     <label>Security Key</label>
-    <input type="password" id="key" placeholder="Enter installer key..." />
-    <button class="btn" onclick="checkRequirements()">Check Requirements â†’</button>
+    <input type="password" id="key" placeholder="Enter installer key…">
+    <button class="btn" onclick="doCheck()">Check Requirements →</button>
   </div>
 
-  <!-- Step 2: Requirements -->
-  <div id="step-check" style="display:none">
-    <div id="check-list" class="checks"></div>
-    <div id="version-info" class="version-box" style="display:none"></div>
-    <button id="btn-install" class="btn" onclick="startInstall()" style="display:none">
-      Install Now âœ“
-    </button>
+  <div id="s2" style="display:none">
+    <div id="checks"></div>
+    <div id="vbox" class="vbox" style="display:none"></div>
+    <button id="btn-i" class="btn" onclick="doInstall()" style="display:none">⚡ Install Now</button>
   </div>
 
-  <!-- Step 3: Install Log -->
-  <div id="step-install" style="display:none">
-    <div class="log" id="install-log"></div>
-    <div id="result-box"></div>
+  <div id="s3" style="display:none">
+    <div class="log" id="log">Installing… please wait (30–60s)\n</div>
+    <div id="result"></div>
   </div>
 
-  <div class="warning-box" id="security-note" style="display:none">
-    âš ï¸ <strong>Security:</strong> Delete this file after install!<br>
-    Path: <code><?= htmlspecialchars($_SERVER['PHP_SELF'] ?? 'web-installer.php') ?></code>
+  <div class="wbox" id="sec" style="display:none">
+    ⚠️ <strong>Delete this file after install!</strong><br>
+    <code><?= htmlspecialchars($_SERVER['PHP_SELF'] ?? '/public/web-installer.php') ?></code>
   </div>
 </div>
-
 <script>
-const SECRET = () => document.getElementById('key').value;
+const key = () => document.getElementById('key').value;
 let zipUrl = '';
 
 async function post(data) {
   const fd = new FormData();
-  fd.append('key', SECRET());
+  fd.append('key', key());
   for (const [k,v] of Object.entries(data)) fd.append(k, v);
-  const r = await fetch('', { method: 'POST', body: fd });
+  const r = await fetch(location.href, {method:'POST', body:fd});
+  if (!r.ok) throw new Error('Server returned ' + r.status + '. Check cPanel Error Logs.');
   return r.json();
 }
 
-async function checkRequirements() {
-  const btn = document.querySelector('#step-key .btn');
-  btn.innerHTML = '<span class="spinner"></span> Checking...';
-  btn.disabled = true;
-
-  const data = await post({ action: 'check' });
-
-  document.getElementById('step-key').style.display   = 'none';
-  document.getElementById('step-check').style.display = 'block';
-
-  const list = document.getElementById('check-list');
-  const checks = [
-    { label: 'PHP Version: ' + data.php,                ok: data.issues?.every(i => !i.includes('PHP 8')) },
-    { label: 'PHP Extensions (zip, curl, json)',        ok: !data.issues?.some(i => i.includes('extension')) },
-    { label: 'Laravel Root: ' + (data.laravel_root || 'Not found'), ok: !!data.laravel_root },
-    { label: 'GitHub Connection',                       ok: !!data.version && data.version !== 'Unknown' },
-  ];
-
-  list.innerHTML = checks.map(c => `
-    <div class="check-item">
-      <div class="dot ${c.ok ? 'ok' : 'err'}"></div>
-      <span>${c.label}</span>
-    </div>
-  `).join('');
-
-  if (data.ok && data.version) {
-    zipUrl = data.zip_url;
-    document.getElementById('version-info').style.display = 'block';
-    document.getElementById('version-info').innerHTML =
-      `ðŸš€ Ready to install <strong>${data.version}</strong>` +
-      (data.changelog ? `<br><small style="color:#64748b;white-space:pre-wrap">${data.changelog}</small>` : '');
-    document.getElementById('btn-install').style.display = 'block';
-  } else if (data.issues?.length) {
-    list.innerHTML += `<div class="error-box">âŒ Fix issues above before installing.</div>`;
+async function doCheck() {
+  const btn = document.querySelector('#s1 .btn');
+  btn.innerHTML = '<span class="spin"></span> Checking…'; btn.disabled = true;
+  try {
+    const d = await post({action:'check'});
+    document.getElementById('s1').style.display = 'none';
+    document.getElementById('s2').style.display = 'block';
+    const rows = [
+      {l:'PHP ' + d.php,                                         ok:!d.issues?.some(i=>i.includes('PHP 8'))},
+      {l:'Extensions (zip, curl)',                               ok:!d.issues?.some(i=>i.includes('extension'))},
+      {l:'Laravel root: ' + (d.laravel_root||'NOT FOUND'),       ok:!!d.laravel_root},
+      {l:'GitHub: ' + (d.version||'Failed'),                    ok:!!d.version && d.version!=='Unknown'},
+    ];
+    document.getElementById('checks').innerHTML = rows.map(r=>
+      `<div class="ci"><div class="dot ${r.ok?'ok':'err'}"></div><span>${r.l}</span></div>`
+    ).join('');
+    if (d.ok) {
+      zipUrl = d.zip_url;
+      const v = document.getElementById('vbox');
+      v.style.display = 'block';
+      v.innerHTML = `🚀 Ready to install <strong>${d.version}</strong>`;
+      document.getElementById('btn-i').style.display = 'block';
+    }
+  } catch(e) {
+    document.getElementById('s1').style.display = 'none';
+    document.getElementById('s2').style.display = 'block';
+    document.getElementById('checks').innerHTML = `<div class="ebox">❌ ${e.message}</div>`;
   }
 }
 
-async function startInstall() {
-  document.getElementById('step-check').style.display   = 'none';
-  document.getElementById('step-install').style.display = 'block';
-
-  const log  = document.getElementById('install-log');
-  const result = document.getElementById('result-box');
-  log.innerHTML = '<span class="spinner"></span> Installing...\n';
-
-  const data = await post({ action: 'install', zip_url: zipUrl });
-
-  if (data.steps) {
-    log.innerHTML = data.steps.map(s => s + '\n').join('');
-  }
-
-  if (data.ok) {
-    result.innerHTML = `
-      <div class="success-box">
-        âœ… <strong>Installation Complete!</strong><br><br>
-        Next steps:<br>
-        1. <strong>Delete this file</strong> (security!)<br>
-        2. Open your CRM â€” AkashSalesPipeline is ready
-      </div>`;
-    document.getElementById('security-note').style.display = 'block';
-  } else {
-    result.innerHTML = `<div class="error-box">âŒ <strong>Error:</strong> ${data.msg || 'Unknown error'}</div>`;
+async function doInstall() {
+  document.getElementById('s2').style.display = 'none';
+  document.getElementById('s3').style.display = 'block';
+  try {
+    const d = await post({action:'install', zip_url:zipUrl});
+    document.getElementById('log').textContent = (d.steps||[]).join('\n');
+    document.getElementById('result').innerHTML = d.ok
+      ? `<div class="sbox">✅ <strong>Done!</strong><br><br>Delete this file → open CRM 🎉</div>`
+      : `<div class="ebox">❌ ${d.msg||'Error'}</div>`;
+    if (d.ok) document.getElementById('sec').style.display = 'block';
+  } catch(e) {
+    document.getElementById('log').textContent += '\n❌ ' + e.message;
   }
 }
 </script>
 </body>
 </html>
-
