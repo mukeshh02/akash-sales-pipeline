@@ -1,0 +1,22 @@
+{
+    "name": "acpcrmtools/acp-sales-guide",
+    "description": "ACP Sales Guide — WhatsApp-first sales assistant panel for Concord CRM",
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {}
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\ACP_Sales_Guide\\": "app/",
+            "Modules\\ACP_Sales_Guide\\Database\\Factories\\": "database/factories/",
+            "Modules\\ACP_Sales_Guide\\Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\ACP_Sales_Guide\\Tests\\": "tests/"
+        }
+    }
+}

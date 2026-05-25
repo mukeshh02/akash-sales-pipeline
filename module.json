@@ -1,0 +1,13 @@
+{
+    "name": "ACP_Sales_Guide",
+    "alias": "acpsalesguide",
+    "description": "ACP Sales Guide — WhatsApp-first sales assistant for Concord CRM. Stage-aware checklists, follow-ups, and templates.",
+    "keywords": ["sales", "crm", "whatsapp", "pipeline"],
+    "priority": 0,
+    "providers": [
+        "Modules\\ACP_Sales_Guide\\Providers\\ACPSalesGuideServiceProvider"
+    ],
+    "files": [],
+    "version": "2.0.0",
+    "update_channel": "https://api.github.com/repos/mukeshh02/akash-sales-pipeline/releases/latest"
+}
